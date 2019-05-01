@@ -1,3 +1,2 @@
 # Distributed-Systems
-Study
-reference mit 6.824
+Study mit 6.824
