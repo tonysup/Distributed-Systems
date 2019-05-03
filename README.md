@@ -1,2 +1,2 @@
 # Distributed-Systems
-Study
+Study mit 6.824
