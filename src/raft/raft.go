@@ -21,7 +21,7 @@ import "sync"
 import "labrpc"
 import "math/rand"
 import "time"
-import "fmt"
+//import "fmt"
 // import "bytes"
 // import "labgob"
 
@@ -59,10 +59,6 @@ type AppendEntries struct {
     LeaderCommit int
 }
 
-type LogEntry struct {
-	Test         int
-}
-
 
 //
 // A Go object implementing a single Raft peer.
@@ -81,6 +77,7 @@ type Raft struct {
     lastLogIndex  int
     lastVoteTime  int64
     status        int //0:follower 1:candidate 2:leader
+    applyCh       chan ApplyMsg
 }
 
 // return currentTerm and whether this server
@@ -93,7 +90,7 @@ func (rf *Raft) GetState() (int, bool) {
 
 	term = rf.currentTerm
 
-	fmt.Printf("me:%d,term:%d\n",rf.me,term)
+	//fmt.Printf("me:%d,term:%d\n",rf.me,term)
 
 	isleader = (rf.status == 2)
 	return term, isleader
@@ -170,13 +167,13 @@ type RequestVoteReply struct {
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 	rf.mu.Lock()
-	fmt.Printf("me:%d,status:%d,term:%d,CandidateId:%d.\n",rf.me,rf.status,args.Term,args.CandidateId)
+	//fmt.Printf("me:%d,status:%d,term:%d,CandidateId:%d.\n",rf.me,rf.status,args.Term,args.CandidateId)
 	reply.Term = rf.currentTerm
 	reply.VoteGranted = false
     if(args.Term < rf.currentTerm || rf.status == 2){
     	reply.VoteGranted = false
     	rf.lastVoteTime = time.Now().Unix()
-    	fmt.Printf("me:%d,not vote for %d.\n",rf.me,args.CandidateId)
+    	//fmt.Printf("me:%d,not vote for %d.\n",rf.me,args.CandidateId)
     	rf.mu.Unlock()
     	return
     }
@@ -186,7 +183,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
     	rf.status = 0
     	rf.lastVoteTime = time.Now().Unix()
     	rf.currentTerm = args.Term
-    	fmt.Printf("me:%d,vote for %d.\n",rf.me,args.CandidateId)
+    	//fmt.Printf("me:%d,vote for %d.\n",rf.me,args.CandidateId)
     //}else{
     	//fmt.Printf("me:%d,not vote for %d.\n",rf.me,args.CandidateId)
     //}
@@ -196,12 +193,23 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 func (rf *Raft) RequestAppendEntries(args *AppendEntries, reply *ApplyMsg) {
 	rf.mu.Lock()
-	fmt.Printf("hear beate,me:%d\n",rf.me)
+	//fmt.Printf("hear beate,me:%d\n",rf.me)
 	if(args.IsHeartBeat){
 		rf.lastVoteTime = time.Now().Unix()
 		rf.currentTerm = args.Term
 		rf.status = 0
 	}
+	reply.Success = true
+	rf.mu.Unlock()
+}
+
+func (rf *Raft) RequestAppendLog(args *ApplyMsg, reply *ApplyMsg) {
+	rf.mu.Lock()
+	//fmt.Printf("hear beate,me:%d\n",rf.me)
+	go func() {
+		rf.applyCh <- *args
+	}()
+
 	reply.Success = true
 	rf.mu.Unlock()
 }
@@ -266,7 +274,28 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	isLeader := true
 
 	// Your code here (2B).
+	rf.mu.Lock()
+	if(rf.status != 2){
+		isLeader = false;
+	}else{
+		term = rf.currentTerm
+		rf.lastLogIndex++
+		index = rf.lastLogIndex
+		count := len(rf.peers)
+		for i := 0; i < count; i++ {
+			tmpindex := i
+			go func() {
+				request := &ApplyMsg{}
+				request.CommandValid = true
+				request.Command = command
+				request.CommandIndex = index
+				response := &ApplyMsg{}
+				rf.peers[tmpindex].Call("Raft.RequestAppendLog", request, response)
+			}()
+		}
+	}
 
+	rf.mu.Unlock()
 
 	return index, term, isLeader
 }
@@ -307,6 +336,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.lastVoteTime = 0
 	rf.currentTerm = 0
 	rf.status = 0 //follower
+	rf.applyCh = applyCh
 	go func() {
 	//loop:
 		for {
@@ -331,7 +361,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 					rf.status = 1 //candidate
 					nowtime = time.Now().Unix()
 					rf.lastVoteTime = nowtime
-					fmt.Printf("candidate:me:%d,status:%d,term:%d\n",rf.me,rf.status,tmpTermId)
+					//fmt.Printf("candidate:me:%d,status:%d,term:%d\n",rf.me,rf.status,tmpTermId)
 					for i := 0; i < count; i++ {
 						if(i != me){
 							tmpindex := i
@@ -373,7 +403,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				nowtime = time.Now().Unix()
 				if(nowtime - rf.lastVoteTime > 1){
 					count := len(peers)
-					fmt.Printf("send heart beat index:%d,count:%d,status:%d.\n",rf.me,count,rf.status)
+					//fmt.Printf("send heart beat index:%d,count:%d,status:%d.\n",rf.me,count,rf.status)
 					args := &AppendEntries{}
 					args.IsHeartBeat = true
 					args.Term = rf.currentTerm
